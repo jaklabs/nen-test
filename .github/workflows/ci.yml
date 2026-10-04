@@ -27,9 +27,30 @@ jobs:
 
       - name: Run tests if any exist
         run: |
-          if ls tests/test_*.py test_*.py >/dev/null 2>&1; then
-            python -m pytest -q 2>/dev/null || \
-              for t in tests/test_*.py test_*.py; do [ -f "$t" ] && python "$t"; done
-          else
+          # ⚠️ FIXED 2026-10-04. Two bugs here meant this repo's tests had NEVER
+          # run in CI, under a green tick, since the workflow was retrofitted.
+          #
+          # 1. Detection was `ls tests/test_*.py test_*.py`. `ls` exits non-zero
+          #    when ANY argument is missing, so a repo with tests in only one of
+          #    those two places read as having none — and the else branch printed
+          #    the reassuring "no tests yet". find, not ls, and the count is
+          #    PRINTED so "no tests" and "tests skipped" stop looking identical.
+          #
+          # 2. The runner was `pytest -q 2>/dev/null || for t in ...; do python
+          #    "$t"; done`. A pytest-style file run with plain `python` defines
+          #    some functions and exits 0, so the fallback asserted nothing — and
+          #    because a shell list takes its LAST command's status, a suite that
+          #    FAILED under pytest could still leave the step green. The 2>/dev/null
+          #    also hid a missing pytest. `a || b` doing exactly what rule 5 in
+          #    ~/claude-server/CLAUDE.md says it does.
+          mapfile -t T < <(find . -name 'test_*.py' \
+            -not -path './.git/*' -not -path '*/node_modules/*' \
+            -not -path '*/venv/*' -not -path '*/.venv/*' \
+            -not -path '*/site-packages/*' -not -path '*/vendor/*')
+          echo "found ${#T[@]} test file(s)"
+          if [ "${#T[@]}" -eq 0 ]; then
             echo 'no tests yet — compile check passed'
+          else
+            python -m pip install --quiet pytest
+            python -m pytest -q
           fi
